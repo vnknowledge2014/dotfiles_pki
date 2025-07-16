@@ -1,0 +1,5 @@
+[wsl2]
+memory=24GB  # Example: Allocate 18GB of RAM
+processors=6 # Example: Use 6 CPU cores
+swap=100GB    # Example: Use 100GB of swap space
+networkingMode=mirrored

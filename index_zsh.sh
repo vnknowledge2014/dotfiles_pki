@@ -13,54 +13,91 @@ setopt SHARE_HISTORY
 setopt HIST_IGNORE_DUPS
 setopt HIST_IGNORE_ALL_DUPS
 
-# Error handling
-set -e  # Exit on error
-trap 'print_error "Script failed at line $LINENO"' ERR
+# Global variables (initialize early)
+typeset -gA plugins
+typeset -ga manual_version_plugins
+typeset -gA recommended_versions
+
+# Error handling - safer approach
+# Note: set -e can cause issues with some functions, so we handle errors manually
 
 # Colors for output (Zsh enhanced)
-autoload -U colors && colors
-typeset -A color_codes
-color_codes=(
-    RED     $'\033[0;31m'
-    GREEN   $'\033[0;32m'
-    YELLOW  $'\033[1;33m'
-    BLUE    $'\033[0;34m'
-    MAGENTA $'\033[0;35m'
-    CYAN    $'\033[0;36m'
-    BOLD    $'\033[1m'
-    NC      $'\033[0m'
-)
+if [[ -n "$ZSH_VERSION" ]]; then
+    autoload -U colors && colors
+fi
 
 # Enhanced printing functions with Zsh features
 print_info() {
-    print -P "%F{blue}[INFO]%f $1"
+    if [[ -n "$ZSH_VERSION" ]]; then
+        print -P "%F{blue}[INFO]%f $1"
+    else
+        printf "\033[0;34m[INFO]\033[0m %s\n" "$1"
+    fi
 }
 
 print_success() {
-    print -P "%F{green}[SUCCESS]%f $1"
+    if [[ -n "$ZSH_VERSION" ]]; then
+        print -P "%F{green}[SUCCESS]%f $1"
+    else
+        printf "\033[0;32m[SUCCESS]\033[0m %s\n" "$1"
+    fi
 }
 
 print_warning() {
-    print -P "%F{yellow}[WARNING]%f $1"
+    if [[ -n "$ZSH_VERSION" ]]; then
+        print -P "%F{yellow}[WARNING]%f $1"
+    else
+        printf "\033[1;33m[WARNING]\033[0m %s\n" "$1"
+    fi
 }
 
 print_error() {
-    print -P "%F{red}[ERROR]%f $1"
+    if [[ -n "$ZSH_VERSION" ]]; then
+        print -P "%F{red}[ERROR]%f $1"
+    else
+        printf "\033[0;31m[ERROR]\033[0m %s\n" "$1" >&2
+    fi
 }
 
 print_step() {
-    print -P "%F{cyan}%B[STEP $1]%b%f $2"
+    if [[ -n "$ZSH_VERSION" ]]; then
+        print -P "%F{cyan}%B[STEP $1]%b%f $2"
+    else
+        printf "\033[0;36m\033[1m[STEP %s]\033[0m %s\n" "$1" "$2"
+    fi
 }
 
 print_substep() {
-    print -P "  %F{magenta}→%f $1"
+    if [[ -n "$ZSH_VERSION" ]]; then
+        print -P "  %F{magenta}→%f $1"
+    else
+        printf "  \033[0;35m→\033[0m %s\n" "$1"
+    fi
 }
 
-# Progress bar function (Zsh specific)
+# Safe progress bar function
 show_progress() {
     local current=$1
     local total=$2
     local description=$3
+    
+    # Input validation
+    if [[ ! "$current" =~ ^[0-9]+$ ]] || [[ ! "$total" =~ ^[0-9]+$ ]]; then
+        print_error "Invalid progress values: current=$current, total=$total"
+        return 1
+    fi
+    
+    # Prevent division by zero
+    if [[ $total -eq 0 ]]; then
+        printf "\r%s [--------------------------------------------------] 0%%" "$description"
+        return 0
+    fi
+    
+    # Ensure current doesn't exceed total
+    if [[ $current -gt $total ]]; then
+        current=$total
+    fi
+    
     local percent=$((current * 100 / total))
     local filled=$((percent / 2))
     local empty=$((50 - filled))
@@ -110,54 +147,31 @@ detect_zsh_plugin_manager() {
     fi
 }
 
-# Enhanced ASDF configuration for Zsh
-configure_asdf_zsh() {
-    local shell_config=$(detect_zsh_config)
-    local plugin_manager=$(detect_zsh_plugin_manager)
-    
-    print_info "Configuring ASDF for Zsh..."
-    print_substep "Config file: $(basename "$shell_config")"
-    print_substep "Plugin manager: $plugin_manager"
-    
-    # Base ASDF configuration
-    local asdf_config="
-# ASDF Configuration for Zsh
+# Simple ASDF shell configuration (matching index.sh logic)
+configure_asdf_shell_zsh() {
+    local config_content="
+# ASDF Configuration
 export ASDF_DIR=\"\$HOME/.asdf\"
-export PATH=\"\$ASDF_DIR/bin:\$ASDF_DIR/shims:\$PATH\"
-
-# Source ASDF for Zsh
-if [[ -f \"\$ASDF_DIR/asdf.sh\" ]]; then
-    source \"\$ASDF_DIR/asdf.sh\"
-fi
-
-# ASDF completions for Zsh
-if [[ -f \"\$ASDF_DIR/completions/asdf.bash\" ]]; then
-    source \"\$ASDF_DIR/completions/asdf.bash\"
-fi
-
-# Zsh-specific ASDF configuration
-fpath=(\$ASDF_DIR/completions \$fpath)
-autoload -Uz compinit && compinit"
+export PATH=\"\$ASDF_DIR/bin:\$ASDF_DIR/shims:\$PATH\""
     
-    # Add plugin manager specific configuration
-    case $plugin_manager in
-        "oh-my-zsh")
-            asdf_config+="\n\n# Oh My Zsh ASDF plugin (alternative to manual setup)\n# plugins=(... asdf)"
-            ;;
-        "prezto")
-            asdf_config+="\n\n# Prezto ASDF module\n# Add 'asdf' to modules in ~/.zpreztorc"
-            ;;
-        "zinit")
-            asdf_config+="\n\n# Zinit ASDF plugin\n# zinit load asdf-vm/asdf"
-            ;;
-    esac
+    local shell_config=$(detect_zsh_config)
     
-    # Check if configuration already exists
-    if ! grep -q "ASDF Configuration for Zsh" "$shell_config" 2>/dev/null; then
-        echo "$asdf_config" >> "$shell_config"
-        print_success "Added ASDF configuration to $(basename "$shell_config")"
+    print_info "Đang thêm cấu hình ASDF vào $(basename "$shell_config")..."
+    
+    # Kiểm tra xem cấu hình đã tồn tại chưa
+    if ! grep -q "ASDF Configuration" "$shell_config" 2>/dev/null; then
+        echo "$config_content" >> "$shell_config"
+        print_success "Đã thêm cấu hình ASDF vào $(basename "$shell_config")"
     else
-        print_warning "ASDF configuration already exists in $(basename "$shell_config")"
+        print_warning "Cấu hình ASDF đã tồn tại trong $(basename "$shell_config")"
+    fi
+}
+
+# Source shell config (matching index.sh logic)
+source_shell_config_zsh() {
+    local config_file=$(detect_zsh_config)
+    if [[ -f "$config_file" ]]; then
+        source "$config_file"
     fi
 }
 
@@ -180,7 +194,6 @@ typeset -gx BUN_CA_BUNDLE_PATH=\"/etc/ssl/certs/ca-certificates.crt\"
 typeset -gx DENO_CERT=\"/etc/ssl/certs/ca-certificates.crt\"
 typeset -gx NODE_EXTRA_CA_CERTS=\"/etc/ssl/certs/ca-certificates.crt\"
 typeset -gx PYTHONHTTPSVERIFY=\"1\"
-typeset -gx PYTHONPATH=\"/etc/ssl/certs/ca-certificates.crt\"
 
 # Zsh-specific certificate array for easy management
 typeset -ga cert_paths=(\"/etc/ssl/certs/ca-certificates.crt\" \"/usr/local/share/ca-certificates\")
@@ -208,7 +221,35 @@ validate_certs() {
 
 # Enhanced package installation with Zsh arrays
 install_required_packages_zsh() {
-    print_step "1" "Installing required packages"
+    print_info "Cài đặt các gói cần thiết (jq, gnupg)..."
+    
+    # Check operating system
+    local os_type=$(uname -s)
+    case "$os_type" in
+        "Linux")
+            # Check if we have the required commands
+            if ! command -v sudo >/dev/null 2>&1; then
+                print_error "sudo is required but not found"
+                return 1
+            fi
+            
+            if ! command -v apt >/dev/null 2>&1; then
+                print_error "apt is required but not found (Debian/Ubuntu only)"
+                return 1
+            fi
+            ;;
+        "Darwin")
+            print_warning "Running on macOS - skipping package installation"
+            print_info "Please ensure you have jq and gnupg installed:"
+            print_info "  brew install jq gnupg"
+            return 0
+            ;;
+        *)
+            print_warning "Unsupported operating system: $os_type"
+            print_info "Please ensure you have jq and gnupg installed manually"
+            return 0
+            ;;
+    esac
     
     # Zsh array of required packages
     local required_packages=(
@@ -239,11 +280,12 @@ install_required_packages_zsh() {
     )
     
     print_substep "Cleaning package cache..."
-    sudo apt clean && sudo apt autoclean
-    sudo rm -rf /var/lib/apt/lists/*
+    sudo apt clean 2>/dev/null || true
+    sudo apt autoclean 2>/dev/null || true
+    sudo rm -rf /var/lib/apt/lists/* 2>/dev/null || true
     
     print_substep "Updating package lists..."
-    if sudo apt update -y --fix-missing; then
+    if sudo apt update -y --fix-missing 2>/dev/null; then
         print_success "Package lists updated"
     else
         print_warning "Package list update failed, continuing..."
@@ -255,9 +297,10 @@ install_required_packages_zsh() {
     local installed_count=0
     
     for package in "${required_packages[@]}"; do
-        show_progress $((++installed_count)) ${#required_packages[@]} "Installing $package"
+        ((installed_count++))
+        show_progress $installed_count ${#required_packages[@]} "Installing $package"
         
-        if sudo apt install -y --fix-missing --fix-broken "$package" &>/dev/null; then
+        if sudo apt install -y --fix-missing --fix-broken "$package" >/dev/null 2>&1; then
             continue
         else
             failed_packages+=("$package")
@@ -270,7 +313,7 @@ install_required_packages_zsh() {
     local optional_installed=0
     
     for package in "${optional_packages[@]}"; do
-        if sudo apt install -y "$package" &>/dev/null; then
+        if sudo apt install -y "$package" >/dev/null 2>&1; then
             ((optional_installed++))
         fi
     done
@@ -285,40 +328,47 @@ install_required_packages_zsh() {
     fi
     
     print_success "All required packages installed"
+    return 0
 }
 
 # Enhanced JSON configuration loading with Zsh
 load_config_zsh() {
     local config_file="./plugins.json"
     
-    print_step "2" "Loading configuration"
+    print_info "Đang tải cấu hình..."
     
     if [[ ! -f "$config_file" ]]; then
         print_error "Configuration file not found: $config_file"
         return 1
     fi
     
-    # Zsh associative arrays (note: Zsh arrays are 1-indexed)
-    typeset -gA plugins
-    typeset -ga manual_version_plugins
-    typeset -gA recommended_versions
+    # Check if jq is available
+    if ! command -v jq >/dev/null 2>&1; then
+        print_error "jq is required but not found"
+        return 1
+    fi
     
     print_substep "Loading plugins configuration..."
     
     # Load plugins into associative array
     local plugin_data
-    plugin_data=$(jq -r '.plugins | to_entries[] | "\(.key)=\(.value)"' "$config_file")
+    plugin_data=$(jq -r '.plugins | to_entries[] | "\(.key)=\(.value)"' "$config_file" 2>/dev/null)
+    
+    if [[ -z "$plugin_data" ]]; then
+        print_error "Failed to parse plugins from $config_file"
+        return 1
+    fi
     
     while IFS='=' read -r key value; do
-        plugins[$key]=$value
+        [[ -n "$key" ]] && plugins[$key]=$value
     done <<< "$plugin_data"
     
     # Load manual version plugins
     local manual_plugins
-    manual_plugins=$(jq -r '.special_handling.manual_version[]' "$config_file")
+    manual_plugins=$(jq -r '.special_handling.manual_version[]' "$config_file" 2>/dev/null)
     
     while IFS= read -r plugin; do
-        manual_version_plugins+=("$plugin")
+        [[ -n "$plugin" ]] && manual_version_plugins+=("$plugin")
     done <<< "$manual_plugins"
     
     # Load recommended versions
@@ -326,15 +376,16 @@ load_config_zsh() {
     recommended_data=$(jq -r '.special_handling.recommended_versions | to_entries[] | "\(.key)=\(.value)"' "$config_file" 2>/dev/null)
     
     while IFS='=' read -r key value; do
-        recommended_versions[$key]=$value
+        [[ -n "$key" ]] && recommended_versions[$key]=$value
     done <<< "$recommended_data"
     
     print_success "Configuration loaded: ${#plugins[@]} plugins, ${#manual_version_plugins[@]} manual"
+    return 0
 }
 
 # Enhanced certificate setup with Zsh features
 setup_certificates_zsh() {
-    print_step "3" "Setting up certificates"
+    print_info "Bước 0: Cài đặt chứng chỉ..."
     
     local cert_dir="./certs"
     
@@ -344,7 +395,7 @@ setup_certificates_zsh() {
     fi
     
     # Find certificate files using Zsh glob patterns
-    local cert_files=($cert_dir/**/*.(crt|pem|cer))
+    local cert_files=($cert_dir/**/*.(crt|pem|cer)(N))
     
     if [[ ${#cert_files[@]} -eq 0 ]]; then
         print_warning "No certificate files found in $cert_dir"
@@ -353,72 +404,125 @@ setup_certificates_zsh() {
     
     print_substep "Found ${#cert_files[@]} certificate files"
     
-    # Copy certificates to system locations
-    print_substep "Installing certificates to system..."
-    
-    for cert_file in "${cert_files[@]}"; do
-        local filename=$(basename "$cert_file")
-        print_substep "Installing $filename"
-        
-        sudo cp "$cert_file" "/usr/local/share/ca-certificates/"
-        sudo cp "$cert_file" "/etc/ssl/certs/"
-    done
-    
-    print_substep "Updating certificate store..."
-    if sudo update-ca-certificates; then
-        print_success "Certificate store updated"
-    else
-        print_error "Failed to update certificate store"
-        return 1
-    fi
+    # Check operating system for certificate installation
+    local os_type=$(uname -s)
+    case "$os_type" in
+        "Linux")
+            # Copy certificates to system locations
+            print_substep "Installing certificates to system (Linux)..."
+            
+            for cert_file in "${cert_files[@]}"; do
+                local filename=$(basename "$cert_file")
+                print_substep "Installing $filename"
+                
+                if sudo cp "$cert_file" "/usr/local/share/ca-certificates/" 2>/dev/null; then
+                    sudo cp "$cert_file" "/etc/ssl/certs/" 2>/dev/null || true
+                else
+                    print_error "Failed to copy $filename"
+                fi
+            done
+            
+            print_substep "Updating certificate store..."
+            if sudo update-ca-certificates 2>/dev/null; then
+                print_success "Certificate store updated"
+            else
+                print_error "Failed to update certificate store"
+                return 1
+            fi
+            ;;
+        "Darwin")
+            print_warning "Running on macOS - certificate installation requires manual setup"
+            print_info "To install certificates on macOS:"
+            for cert_file in "${cert_files[@]}"; do
+                local filename=$(basename "$cert_file")
+                print_info "  security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain '$cert_file'"
+            done
+            ;;
+        *)
+            print_warning "Unsupported OS for automatic certificate installation: $os_type"
+            print_info "Please install certificates manually for your system"
+            ;;
+    esac
     
     # Configure certificate environment
     configure_shell_certificates_zsh
     
     print_success "Certificates configured"
+    return 0
 }
 
-# Enhanced ASDF installation check with Zsh
+# Check ASDF installation (exact logic from index.sh, adapted for Zsh)
 check_asdf_zsh() {
-    print_step "4" "Checking ASDF installation"
-    
-    if command -v asdf &>/dev/null; then
-        print_success "ASDF is already installed"
-        return 0
-    fi
-    
-    print_warning "ASDF not found, installing..."
-    
-    # Default ASDF installation
-    local asdf_version="v0.18.0"
-    local asdf_dir="$HOME/.asdf"
-    
-    print_substep "Cloning ASDF repository..."
-    
-    if [[ -d "$asdf_dir" ]]; then
-        print_substep "Updating existing ASDF installation..."
-        cd "$asdf_dir"
-        git fetch --all
-        git checkout "$asdf_version"
-        cd - >/dev/null
-    else
-        if git clone https://github.com/asdf-vm/asdf.git "$asdf_dir" --branch "$asdf_version"; then
-            print_success "ASDF cloned successfully"
-        else
-            print_error "Failed to clone ASDF"
-            return 1
+    if ! command -v asdf &> /dev/null; then
+        print_warning "asdf chưa được cài đặt."
+        echo
+        
+        # Zsh-specific read command
+        read "asdf_url?Nhập link tải asdf (ví dụ: https://github.com/asdf-vm/asdf/releases/download/v0.18.0/asdf-v0.18.0-linux-amd64.tar.gz): "
+        
+        if [[ -z "$asdf_url" ]]; then
+            print_error "Link không được để trống"
+            exit 1
         fi
+        
+        print_info "Đang tải và cài đặt asdf..."
+        
+        # Tạo thư mục tạm
+        local temp_dir=$(mktemp -d)
+        local original_dir=$(pwd)
+        cd "$temp_dir"
+        
+        # Tải file
+        if curl -fsSL "$asdf_url" -o asdf.tar.gz; then
+            print_success "Đã tải asdf"
+        else
+            print_error "Không thể tải asdf từ $asdf_url"
+            cd "$original_dir"
+            rm -rf "$temp_dir"
+            exit 1
+        fi
+        
+        # Giải nén
+        if tar -xzf asdf.tar.gz; then
+            print_success "Đã giải nén asdf"
+        else
+            print_error "Không thể giải nén asdf"
+            cd "$original_dir"
+            rm -rf "$temp_dir"
+            exit 1
+        fi
+        
+        # Tìm file thực thi asdf (Zsh-specific find)
+        local asdf_bin=$(find . -name "asdf" -type f -executable | head -1)
+        if [[ -z "$asdf_bin" ]]; then
+            print_error "Không tìm thấy file thực thi asdf"
+            cd "$original_dir"
+            rm -rf "$temp_dir"
+            exit 1
+        fi
+        
+        # Sao chép vào /usr/local/bin
+        if sudo cp "$asdf_bin" /usr/local/bin/asdf && sudo chmod +x /usr/local/bin/asdf; then
+            print_success "Đã cài đặt asdf vào /usr/local/bin"
+        else
+            print_error "Không thể cài đặt asdf"
+            cd "$original_dir"
+            rm -rf "$temp_dir"
+            exit 1
+        fi
+        
+        # Dọn dẹp
+        cd "$original_dir"
+        rm -rf "$temp_dir"
+        
+        # Cấu hình ASDF trong shell config
+        configure_asdf_shell_zsh
+        
+        # Khởi động lại shell
+        print_info "Khởi động lại shell để áp dụng asdf..."
+        source_shell_config_zsh
     fi
-    
-    # Configure ASDF in shell
-    configure_asdf_zsh
-    
-    # Source ASDF for current session
-    export ASDF_DIR="$asdf_dir"
-    export PATH="$ASDF_DIR/bin:$ASDF_DIR/shims:$PATH"
-    source "$ASDF_DIR/asdf.sh"
-    
-    print_success "ASDF installed and configured"
+    print_success "asdf đã được cài đặt"
 }
 
 # Enhanced plugin addition with Zsh progress tracking
@@ -429,7 +533,7 @@ add_plugin_zsh() {
     print_substep "Adding plugin: $plugin_name"
     
     # Check if plugin already exists
-    if asdf plugin list | grep -q "^$plugin_name$"; then
+    if asdf plugin list 2>/dev/null | grep -q "^$plugin_name$"; then
         print_warning "Plugin $plugin_name already exists"
         return 0
     fi
@@ -463,36 +567,14 @@ install_latest_zsh() {
             return 1
         fi
         
-        # Show available versions
-        print_info "Available versions for $plugin_name:"
-        for i in {1..${#versions[@]}}; do
-            print "  $i) ${versions[$i]}"
-        done
-        
-        # Get recommended version if available
-        if [[ -n "${recommended_versions[$plugin_name]}" ]]; then
-            print_info "Recommended version: ${recommended_versions[$plugin_name]}"
-            print -n "Press Enter for recommended version, or select number: "
-            read -r choice
-            
-            if [[ -z "$choice" ]]; then
-                version="${recommended_versions[$plugin_name]}"
-            elif [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#versions[@]} ]]; then
-                version="${versions[$choice]}"
-            else
-                print_error "Invalid selection"
-                return 1
-            fi
+        # Use recommended version if available
+        if [[ -n "${recommended_versions[$plugin_name]:-}" ]]; then
+            version="${recommended_versions[$plugin_name]}"
+            print_info "Using recommended version: $version"
         else
-            print -n "Select version (1-${#versions[@]}): "
-            read -r choice
-            
-            if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le ${#versions[@]} ]]; then
-                version="${versions[$choice]}"
-            else
-                print_error "Invalid selection"
-                return 1
-            fi
+            # Use latest version as fallback
+            version="${versions[-1]}"
+            print_info "Using latest version: $version"
         fi
     else
         # Get latest version automatically
@@ -506,11 +588,11 @@ install_latest_zsh() {
     print_substep "Installing $plugin_name version $version..."
     
     # Install with progress indication
-    if asdf install "$plugin_name" "$version"; then
+    if asdf install "$plugin_name" "$version" 2>/dev/null; then
         print_success "Installed $plugin_name $version"
         
         # Set global version
-        if asdf global "$plugin_name" "$version"; then
+        if asdf global "$plugin_name" "$version" 2>/dev/null; then
             print_success "Set $plugin_name $version as global"
         else
             print_warning "Failed to set global version for $plugin_name"
@@ -525,7 +607,7 @@ install_latest_zsh() {
 
 # Enhanced tool configuration with Zsh
 configure_tools_zsh() {
-    print_step "7" "Configuring tools with certificates"
+    print_info "Cấu hình các công cụ với chứng chỉ SSL..."
     
     local tools_config=(
         "npm:npm config set cafile /etc/ssl/certs/ca-certificates.crt"
@@ -533,9 +615,11 @@ configure_tools_zsh() {
         "git:git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt"
         "git:git config --global http.sslVerify true"
         "cargo:mkdir -p ~/.cargo"
-        "cargo:echo '[http]\\ncainfo = \"/etc/ssl/certs/ca-certificates.crt\"' > ~/.cargo/config.toml"
+        "cargo:echo '[http]' > ~/.cargo/config.toml"
+        "cargo:echo 'cainfo = \"/etc/ssl/certs/ca-certificates.crt\"' >> ~/.cargo/config.toml"
         "pip:mkdir -p ~/.config/pip"
-        "pip:echo '[global]\\ncert = /etc/ssl/certs/ca-certificates.crt' > ~/.config/pip/pip.conf"
+        "pip:echo '[global]' > ~/.config/pip/pip.conf"
+        "pip:echo 'cert = /etc/ssl/certs/ca-certificates.crt' >> ~/.config/pip/pip.conf"
     )
     
     for config in "${tools_config[@]}"; do
@@ -568,39 +652,54 @@ main_zsh() {
     
     print_info "Starting ASDF installation process..."
     print_info "Detected Zsh version: $ZSH_VERSION"
+    print_info "Operating system: $(uname -s)"
     
-    # Execute main steps
-    setup_certificates_zsh
-    install_required_packages_zsh
-    load_config_zsh
-    check_asdf_zsh
+    # Check for test mode
+    if [[ "$1" == "--test" ]]; then
+        print_warning "Running in test mode - no actual installation will occur"
+        print_info "Test mode completed successfully"
+        return 0
+    fi
     
-    # Install plugins and languages
-    print_step "5" "Adding ASDF plugins"
+    # Execute main steps with error handling
+    setup_certificates_zsh || { print_error "Certificate setup failed"; exit 1; }
+    install_required_packages_zsh || { print_error "Package installation failed"; exit 1; }
+    load_config_zsh || { print_error "Configuration loading failed"; exit 1; }
+    check_asdf_zsh || { print_error "ASDF installation failed"; exit 1; }
+    
+    # Install plugins and languages  
+    print_info "Bước 1: Thêm các plugin..."
     
     local failed_plugins=()
     local plugin_count=0
     
     for plugin_name in "${(@k)plugins}"; do
-        show_progress $((++plugin_count)) ${#plugins[@]} "Processing plugins"
+        ((plugin_count++))
+        show_progress $plugin_count ${#plugins[@]} "Processing plugins"
         
         if ! add_plugin_zsh "$plugin_name" "${plugins[$plugin_name]}"; then
             failed_plugins+=("$plugin_name")
         fi
     done
     
-    print_step "6" "Installing language versions"
+    print_info "Bước 2: Cài đặt phiên bản mới nhất..."
     
     local failed_installs=()
     local install_count=0
+    local successful_plugins=()
     
     for plugin_name in "${(@k)plugins}"; do
         if [[ ! " ${failed_plugins[*]} " =~ " $plugin_name " ]]; then
-            show_progress $((++install_count)) $((${#plugins[@]} - ${#failed_plugins[@]})) "Installing versions"
-            
-            if ! install_latest_zsh "$plugin_name"; then
-                failed_installs+=("$plugin_name")
-            fi
+            successful_plugins+=("$plugin_name")
+        fi
+    done
+    
+    for plugin_name in "${successful_plugins[@]}"; do
+        ((install_count++))
+        show_progress $install_count ${#successful_plugins[@]} "Installing versions"
+        
+        if ! install_latest_zsh "$plugin_name"; then
+            failed_installs+=("$plugin_name")
         fi
     done
     
@@ -636,5 +735,7 @@ main_zsh() {
     print_success "Setup complete! Welcome to your new development environment!"
 }
 
-# Execute main function
-main_zsh "$@"
+# Execute main function only if script is run directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]] || [[ "${0}" == *"index_zsh.sh" ]]; then
+    main_zsh "$@"
+fi

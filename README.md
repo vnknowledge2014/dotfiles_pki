@@ -1,16 +1,16 @@
-# Dotfiles PKI Setup
+# PKI Development Environment
 
-Tự động cài đặt và cấu hình môi trường phát triển với hỗ trợ PKI certificates trên Windows và WSL2.
+Automated setup for development environment with PKI certificate support on Windows, WSL2, and Docker.
 
-## Tính năng
+## Features
 
-- **PKI Certificate Management**: Tự động cài đặt certificates cho Windows và Linux
-- **WSL2 Setup**: Cài đặt và cấu hình WSL2 với Kali Linux
-- **Font Installation**: Cài đặt fonts FiraCode và FiraMono
-- **Development Environment**: Tự động cài đặt 19+ ngôn ngữ lập trình qua ASDF
-- **Container Support**: Cài đặt Docker và Podman
+- **PKI Certificate Management**: Auto-install certificates for Windows, Linux, and Docker
+- **WSL2 Setup**: Install and configure WSL2 with Kali Linux
+- **Docker Support**: Containerized development environment with CA certificates
+- **Multi-Language Support**: 19+ programming languages via ASDF
+- **Cross-Platform**: Windows, Linux, and Docker containers
 
-## Cấu trúc Project
+## Project Structure
 
 ```
 dotfiles_pki/
@@ -20,7 +20,40 @@ dotfiles_pki/
 │   └── .wslconfig      # WSL2 configuration
 ├── index.ps1           # Windows setup script
 ├── index.sh            # Linux setup script
+├── Dockerfile          # Docker container definition
+├── build.sh            # Docker build script
+├── docker-compose.yml  # Docker compose configuration
 └── README.md           # Documentation
+```
+
+## Docker Usage
+
+### Quick Start
+
+```bash
+# Build with Node.js and Python
+./build.sh --debian --nodejs --python
+
+# Build all languages
+./build.sh --alpine --all
+
+# Run with Docker Compose
+docker-compose up -d
+```
+
+### Build Options
+
+```bash
+# Base images
+./build.sh --alpine    # Minimal Alpine Linux
+./build.sh --debian    # Stable Debian (default)
+./build.sh --ubuntu    # Ubuntu LTS
+
+# Languages
+./build.sh --nodejs --python --golang --rust --java
+
+# Custom
+./build.sh --base fedora:latest --tag my-dev:v1.0
 ```
 
 ## Yêu cầu

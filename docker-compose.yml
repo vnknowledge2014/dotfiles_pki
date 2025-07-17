@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  pki-dev:
+    build: .
+    container_name: pki-dev
+    volumes:
+      - ./certs:/usr/local/share/ca-certificates:ro
+    environment:
+      - SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+      - SSL_CERT_DIR=/etc/ssl/certs
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+    ports:
+      - "3000:3000"
+      - "8080:8080"
+    command: tail -f /dev/null
+    restart: unless-stopped

@@ -1,0 +1,45 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+*.md
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+*.log
+
+# Build artifacts
+node_modules/
+target/
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Cache files
+.cache/
+.npm/
+.cargo/
+.go/
+
+# Zone identifier files
+*.Zone.Identifier
+
+# Docker files
+docker-compose.override.yml
+.dockerignore

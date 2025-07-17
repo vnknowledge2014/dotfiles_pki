@@ -1,0 +1,29 @@
+{
+  "plugins": {
+    "cmake": "https://github.com/srivathsanmurali/asdf-cmake.git",
+    "bun": "https://github.com/cometkim/asdf-bun.git",
+    "nodejs": "https://github.com/asdf-vm/asdf-nodejs.git",
+    "deno": "https://github.com/asdf-community/asdf-deno.git",
+    "rust": "https://github.com/asdf-community/asdf-rust.git",
+    "zig": "https://github.com/cheetah/asdf-zig.git",
+    "ocaml": "https://github.com/asdf-community/asdf-ocaml.git",
+    "golang": "https://github.com/asdf-community/asdf-golang.git",
+    "uv": "https://github.com/asdf-community/asdf-uv.git",
+    "python": "https://github.com/asdf-community/asdf-python.git",
+    "haskell": "https://github.com/vic/asdf-haskell.git",
+    "erlang": "https://github.com/asdf-vm/asdf-erlang.git",
+    "elixir": "https://github.com/asdf-vm/asdf-elixir.git",
+    "flutter": "https://github.com/asdf-community/asdf-flutter.git",
+    "java": "https://github.com/halcyon/asdf-java.git",
+    "lua": "https://github.com/Stratus3D/asdf-lua.git",
+    "purescript": "https://github.com/jrrom/asdf-purescript.git",
+    "v": "https://github.com/jthegedus/asdf-v",
+    "gleam": "https://github.com/asdf-community/asdf-gleam.git"
+  },
+  "special_handling": {
+    "manual_version": ["java", "haskell", "elixir", "cmake"],
+    "recommended_versions": {
+      "cmake": "4.0.3"
+    }
+  }
+}

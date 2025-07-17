@@ -29,6 +29,149 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Hàm detect shell config file
+detect_shell_config() {
+    if [ "$SHELL" = "/bin/zsh" ] || [ "$SHELL" = "/usr/bin/zsh" ] || [ -n "$ZSH_VERSION" ]; then
+        echo "$HOME/.zshrc"
+    else
+        echo "$HOME/.bashrc"
+    fi
+}
+
+# Hàm thêm cấu hình ASDF vào file shell config
+configure_asdf() {
+    local shell_config=$(detect_shell_config)
+    local config_content="
+# ASDF Configuration
+export ASDF_DIR=\"\$HOME/.asdf\"
+export PATH=\"\$ASDF_DIR/bin:\$ASDF_DIR/shims:\$PATH\"
+"
+    
+    echo "Đang thêm cấu hình ASDF vào $(basename "$shell_config")..."
+    
+    # Kiểm tra xem cấu hình đã tồn tại chưa
+    if ! grep -q "ASDF Configuration" "$shell_config" 2>/dev/null; then
+        echo "$config_content" >> "$shell_config"
+        echo "Đã thêm cấu hình ASDF vào $(basename "$shell_config")"
+    else
+        echo "Cấu hình ASDF đã tồn tại trong $(basename "$shell_config")"
+    fi
+    
+    echo "Khởi động lại shell hoặc chạy 'source $shell_config' để áp dụng cấu hình"
+}
+
+# Hàm source shell config
+source_shell_config() {
+    local config_file=$(detect_shell_config)
+    if [ -f "$config_file" ]; then
+        source "$config_file"
+    fi
+}
+
+# Cài đặt các gói cần thiết
+install_required_packages() {
+    print_info "Cài đặt các gói cần thiết (jq, gnupg)..."
+    
+    # Dọn dẹp cache và sửa lỗi dependency
+    print_info "Dọn dẹp cache và sửa lỗi dependency..."
+    sudo apt clean
+    sudo apt autoclean
+    sudo rm -rf /var/lib/apt/lists/*
+    
+    # Cập nhật danh sách gói
+    if sudo apt update -y --fix-missing; then
+        print_success "Đã cập nhật danh sách gói"
+    else
+        print_warning "Không thể cập nhật danh sách gói, tiếp tục cài đặt..."
+    fi
+    
+    # Sửa lỗi gói bị hỏng trước
+    print_info "Sửa lỗi gói bị hỏng..."
+    sudo apt --fix-broken install -y
+    
+    # Cài đặt từng gói riêng biệt
+    local packages=("jq" "gnupg")
+    local failed_packages=()
+    
+    for package in "${packages[@]}"; do
+        print_info "Cài đặt $package..."
+        if sudo apt install -y --fix-missing --fix-broken "$package"; then
+            print_success "Đã cài đặt $package"
+        else
+            print_warning "Không thể cài đặt $package, thử cách khác..."
+            # Thử cài đặt với --no-install-recommends
+            if sudo apt install -y --fix-missing --fix-broken --no-install-recommends "$package"; then
+                print_success "Đã cài đặt $package (không có gói khuyến nghị)"
+            else
+                failed_packages+=("$package")
+                print_error "Không thể cài đặt $package"
+            fi
+        fi
+    done
+    
+    # Kiểm tra kết quả
+    if [ ${#failed_packages[@]} -gt 0 ]; then
+        print_error "Các gói không thể cài đặt: ${failed_packages[*]}"
+        print_info "Thử cài đặt thủ công: sudo apt install ${failed_packages[*]}"
+        exit 1
+    fi
+    
+    # Refresh PATH sau khi cài đặt
+    hash -r
+    export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+    print_success "Đã cài đặt tất cả gói cần thiết"
+    echo
+}
+
+# Hàm load config từ JSON
+load_config() {
+    local config_file="./plugins.json"
+    if [ ! -f "$config_file" ]; then
+        print_error "Không tìm thấy file cấu hình $config_file"
+        exit 1
+    fi
+    
+    # Parse JSON và tạo associative array
+    declare -gA plugins
+    declare -ga manual_version_plugins
+    declare -gA recommended_versions
+    
+    # Load plugins
+    while IFS='=' read -r key value; do
+        plugins["$key"]="$value"
+    done < <(jq -r '.plugins | to_entries[] | "\(.key)=\(.value)"' "$config_file")
+    
+    # Load manual version plugins
+    while IFS= read -r plugin; do
+        manual_version_plugins+=("$plugin")
+    done < <(jq -r '.special_handling.manual_version[]' "$config_file")
+    
+    # Load recommended versions
+    while IFS='=' read -r key value; do
+        recommended_versions["$key"]="$value"
+    done < <(jq -r '.special_handling.recommended_versions | to_entries[] | "\(.key)=\(.value)"' "$config_file" 2>/dev/null || true)
+}
+
+# Cấu hình ASDF trong shell config
+configure_asdf_shell() {
+    local config_content="
+# ASDF Configuration
+export ASDF_DIR=\"$HOME/.asdf\"
+export PATH=\"$ASDF_DIR/bin:$ASDF_DIR/shims:$PATH\""
+    
+    local shell_config=$(detect_shell_config)
+    
+    print_info "Đang thêm cấu hình ASDF vào $(basename "$shell_config")..."
+    
+    # Kiểm tra xem cấu hình đã tồn tại chưa
+    if ! grep -q "ASDF Configuration" "$shell_config" 2>/dev/null; then
+        echo "$config_content" >> "$shell_config"
+        print_success "Đã thêm cấu hình ASDF vào $(basename "$shell_config")"
+    else
+        print_warning "Cấu hình ASDF đã tồn tại trong $(basename "$shell_config")"
+    fi
+}
+
 # Kiểm tra asdf đã được cài đặt chưa
 check_asdf() {
     if ! command -v asdf &> /dev/null; then
@@ -82,9 +225,12 @@ check_asdf() {
         cd - > /dev/null
         rm -rf "$temp_dir"
         
+        # Cấu hình ASDF trong shell config
+        configure_asdf_shell
+        
         # Khởi động lại shell
         print_info "Khởi động lại shell để áp dụng asdf..."
-        source $HOME/.bashrc
+        source_shell_config
     fi
     print_success "asdf đã được cài đặt"
 }
@@ -133,16 +279,9 @@ export BUN_CA_BUNDLE_PATH=\"/etc/ssl/certs/ca-certificates.crt\"
 # Deno certificate configuration
 export DENO_CERT=\"/etc/ssl/certs/ca-certificates.crt\""
     
-    local shell_config=""
+    local shell_config=$(detect_shell_config)
     
-    # Kiểm tra shell đang sử dụng
-    if [ "$SHELL" = "/bin/zsh" ] || [ "$SHELL" = "/usr/bin/zsh" ]; then
-        shell_config="$HOME/.zshrc"
-        print_info "Đang thêm cấu hình chứng chỉ vào .zshrc..."
-    else
-        shell_config="$HOME/.bashrc"
-        print_info "Đang thêm cấu hình chứng chỉ vào .bashrc..."
-    fi
+    print_info "Đang thêm cấu hình chứng chỉ vào $(basename "$shell_config")..."
     
     # Kiểm tra xem cấu hình đã tồn tại chưa
     if ! grep -q "CERTIFICATE BYPASS" "$shell_config" 2>/dev/null; then
@@ -154,7 +293,7 @@ export DENO_CERT=\"/etc/ssl/certs/ca-certificates.crt\""
     
     # Khởi động lại shell để áp dụng cấu hình
     print_info "Khởi động lại shell để áp dụng cấu hình..."
-    source $HOME/.bashrc
+    source_shell_config
 }
 
 # Cài đặt Docker và Podman
@@ -162,7 +301,7 @@ install_docker_podman() {
     print_info "Bước 0.5: Cài đặt Docker và Podman..."
     
     print_info "Cập nhật hệ thống..."
-    if sudo apt update -y && sudo apt upgrade -y; then
+    if sudo apt update -y --fix-missing && sudo apt upgrade -y --fix-missing; then
         print_success "Đã cập nhật hệ thống"
     else
         print_error "Không thể cập nhật hệ thống"
@@ -178,6 +317,12 @@ install_docker_podman() {
     fi
     
     print_info "Thêm Docker GPG key..."
+    # Kiểm tra gpg đã có chưa
+    if ! command -v gpg >/dev/null 2>&1; then
+        print_error "Lệnh gpg không khả dụng sau khi cài đặt"
+        return 1
+    fi
+    
     if curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg; then
         print_success "Đã thêm Docker GPG key"
         if sudo chmod a+r /etc/apt/keyrings/docker.gpg; then
@@ -200,7 +345,7 @@ install_docker_podman() {
     fi
     
     print_info "Cập nhật danh sách gói sau khi thêm repository..."
-    if sudo apt update -y; then
+    if sudo apt update -y --fix-missing; then
         print_success "Đã cập nhật danh sách gói"
     else
         print_error "Không thể cập nhật danh sách gói"
@@ -220,15 +365,23 @@ install_docker_podman() {
     fi
     
     print_info "Sửa lỗi gói bị hỏng (nếu có)..."
-    if sudo apt install -f -y; then
+    if sudo apt install -f -y --fix-missing --fix-broken; then
         print_success "Đã sửa lỗi gói bị hỏng"
     else
         print_error "Không thể sửa lỗi gói bị hỏng"
         return 1
     fi
     
-    print_info "Cài đặt Docker, Podman và các gói phụ thuộc..."
-    if sudo apt install -y build-essential unzip autoconf libncurses5-dev libssl-dev ca-certificates curl podman docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin snapd liblzma-dev; then
+    print_info "Cài đặt các gói phụ thuộc bổ sung..."
+    if sudo apt install -y --fix-missing --fix-broken build-essential unzip autoconf libncurses5-dev libssl-dev ca-certificates curl liblzma-dev snapd python3-tk; then
+        print_success "Đã cài đặt các gói phụ thuộc bổ sung"
+    else
+        print_error "Không thể cài đặt các gói phụ thuộc bổ sung"
+        return 1
+    fi
+    
+    print_info "Cài đặt Docker và Podman..."
+    if sudo apt install -y --fix-missing --fix-broken podman docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
         print_success "Đã cài đặt Docker và Podman"
     else
         print_error "Không thể cài đặt Docker và Podman"
@@ -272,8 +425,16 @@ install_latest() {
     local plugin_name=$1
     local version=""
     
-    # Xử lý đặc biệt cho Java, Haskell, Elixir và CMake
-    if [[ "$plugin_name" =~ ^(java|haskell|elixir|cmake)$ ]]; then
+    # Kiểm tra xem plugin có cần nhập version thủ công không
+    local needs_manual=false
+    for manual_plugin in "${manual_version_plugins[@]}"; do
+        if [ "$plugin_name" = "$manual_plugin" ]; then
+            needs_manual=true
+            break
+        fi
+    done
+    
+    if [ "$needs_manual" = true ]; then
         print_info "Đang lấy danh sách phiên bản cho $plugin_name..."
         if ! asdf list all "$plugin_name"; then
             print_error "Không thể lấy danh sách phiên bản của $plugin_name"
@@ -281,11 +442,11 @@ install_latest() {
         fi
         
         echo
-        if [ "$plugin_name" = "cmake" ]; then
-            read -p "Nhập phiên bản $plugin_name bạn muốn cài đặt (khuyến nghị: 4.0.3): " version
-        else
-            read -p "Nhập phiên bản $plugin_name bạn muốn cài đặt: " version
+        local prompt="Nhập phiên bản $plugin_name bạn muốn cài đặt"
+        if [ -n "${recommended_versions[$plugin_name]}" ]; then
+            prompt="$prompt (khuyến nghị: ${recommended_versions[$plugin_name]})"
         fi
+        read -p "$prompt: " version
         
         if [ -z "$version" ]; then
             print_error "Phiên bản không được để trống"
@@ -553,6 +714,12 @@ main() {
     
     # Cài đặt chứng chỉ
     setup_certificates
+
+    # Cài đặt các gói cần thiết trước
+    install_required_packages
+    
+    # Load cấu hình từ JSON
+    load_config
     
     # Cài đặt Docker và Podman
     install_docker_podman
@@ -560,29 +727,6 @@ main() {
     # Kiểm tra asdf
     check_asdf
     echo
-    
-    # Danh sách các plugin và URL
-    declare -A plugins=(
-        ["cmake"]="https://github.com/srivathsanmurali/asdf-cmake.git"
-        ["bun"]="https://github.com/cometkim/asdf-bun.git"
-        ["nodejs"]="https://github.com/asdf-vm/asdf-nodejs.git"
-        ["deno"]="https://github.com/asdf-community/asdf-deno.git"
-        ["rust"]="https://github.com/asdf-community/asdf-rust.git"
-        ["zig"]="https://github.com/cheetah/asdf-zig.git"
-        ["ocaml"]="https://github.com/asdf-community/asdf-ocaml.git"
-        ["golang"]="https://github.com/asdf-community/asdf-golang.git"
-        ["uv"]="https://github.com/asdf-community/asdf-uv.git"
-        ["python"]="https://github.com/asdf-community/asdf-python.git"
-        ["haskell"]="https://github.com/vic/asdf-haskell.git"
-        ["erlang"]="https://github.com/asdf-vm/asdf-erlang.git"
-        ["elixir"]="https://github.com/asdf-vm/asdf-elixir.git"
-        ["flutter"]="https://github.com/asdf-community/asdf-flutter.git"
-        ["java"]="https://github.com/halcyon/asdf-java.git"
-        ["lua"]="https://github.com/Stratus3D/asdf-lua.git"
-        ["purescript"]="https://github.com/jrrom/asdf-purescript.git"
-        ["v"]="https://github.com/jthegedus/asdf-v"
-        ["gleam"]="https://github.com/asdf-community/asdf-gleam.git"
-    )
     
     # Thêm tất cả các plugin
     print_info "Bước 1: Thêm các plugin..."
@@ -620,6 +764,7 @@ main() {
     
     # Cấu hình các công cụ
     configure_tools
+    configure_asdf
     
     # Tóm tắt kết quả
     echo
@@ -640,7 +785,9 @@ main() {
     echo
     print_info "Chạy 'asdf list' để xem các phiên bản đã cài đặt"
     print_info "Chạy 'asdf current' để xem các phiên bản hiện tại"
-    print_info "Khởi động lại terminal hoặc chạy 'source ~/.bashrc' (hoặc 'source ~/.zshrc') để áp dụng cấu hình chứng chỉ"
+    print_info "Khởi động lại terminal hoặc chạy 'source $(detect_shell_config)' để áp dụng cấu hình chứng chỉ"
+    source $(detect_shell_config)
+    exec $SHELL
 }
 
 # Chạy script

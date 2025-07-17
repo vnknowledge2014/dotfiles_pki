@@ -9,24 +9,6 @@ if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdent
 
 Write-Host "Starting dotfiles setup..." -ForegroundColor Green
 
-# 0. Install PKI certificates
-Write-Host "Installing PKI certificates..." -ForegroundColor Yellow
-$certsPath = Join-Path $PSScriptRoot "certs"
-if (Test-Path $certsPath) {
-    Get-ChildItem $certsPath -Include "*.cer", "*.crt", "*.pem" | ForEach-Object {
-        $certFile = $_.FullName
-        $certName = $_.Name
-        try {
-            Import-Certificate -FilePath $certFile -CertStoreLocation Cert:\LocalMachine\Root
-            Write-Host "Installed certificate: $certName" -ForegroundColor Green
-        } catch {
-            Write-Host "Failed to install certificate: $certName - $($_.Exception.Message)" -ForegroundColor Red
-        }
-    }
-} else {
-    Write-Host "Certs folder not found!" -ForegroundColor Red
-}
-
 # 1. Install fonts from fonts folder
 Write-Host "Installing fonts..." -ForegroundColor Yellow
 $fontsPath = Join-Path $PSScriptRoot "fonts"

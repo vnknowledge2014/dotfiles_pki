@@ -1,7 +1,33 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # ASDF Auto Install Script
 # Tự động cài đặt các plugin và phiên bản mới nhất của các ngôn ngữ lập trình
+# Universal compatibility: Bash, Zsh, Zsh+OhMyZsh
+
+# Detect actual shell environment
+ACTUAL_SHELL=""
+HAS_OH_MY_ZSH=false
+
+# Store original ZSH_VERSION before any modifications
+ORIGINAL_ZSH_VERSION="$ZSH_VERSION"
+
+if [[ -n "$ZSH_VERSION" ]]; then
+    ACTUAL_SHELL="zsh"
+    # Check for Oh My Zsh
+    if [[ -n "$ZSH" ]] || [[ -f "$HOME/.oh-my-zsh/oh-my-zsh.sh" ]]; then
+        HAS_OH_MY_ZSH=true
+    fi
+    # Zsh compatibility: enable bash-like word splitting
+    setopt SH_WORD_SPLIT 2>/dev/null || true
+elif [[ -n "$BASH_VERSION" ]]; then
+    ACTUAL_SHELL="bash"
+    # Check if we're running bash but parent shell is zsh with Oh My Zsh
+    if [[ -f "$HOME/.zshrc" ]] && grep -q "oh-my-zsh" "$HOME/.zshrc" 2>/dev/null; then
+        HAS_OH_MY_ZSH=true
+    fi
+else
+    ACTUAL_SHELL="unknown"
+fi
 
 set -e  # Dừng script nếu có lỗi
 
@@ -31,7 +57,8 @@ print_error() {
 
 # Hàm detect shell config file
 detect_shell_config() {
-    if [ "$SHELL" = "/bin/zsh" ] || [ "$SHELL" = "/usr/bin/zsh" ] || [ -n "$ZSH_VERSION" ]; then
+    # Use original ZSH_VERSION or current shell detection
+    if [[ -n "$ORIGINAL_ZSH_VERSION" ]] || [[ "$ACTUAL_SHELL" == "zsh" ]] || [[ "$SHELL" == *"zsh"* ]]; then
         echo "$HOME/.zshrc"
     else
         echo "$HOME/.bashrc"
@@ -60,12 +87,39 @@ export PATH=\"\$ASDF_DIR/bin:\$ASDF_DIR/shims:\$PATH\"
     echo "Khởi động lại shell hoặc chạy 'source $shell_config' để áp dụng cấu hình"
 }
 
-# Hàm source shell config
+# Hàm source shell config - Smart sourcing với Oh My Zsh compatibility
 source_shell_config() {
     local config_file=$(detect_shell_config)
-    if [ -f "$config_file" ]; then
-        source "$config_file"
+    if [[ ! -f "$config_file" ]]; then
+        return 0
     fi
+    
+    # Case 1: Running in Zsh (native or with Oh My Zsh) - safe to source
+    if [[ "$ACTUAL_SHELL" == "zsh" ]]; then
+        source "$config_file" 2>/dev/null || true
+        return 0
+    fi
+    
+    # Case 2: Running in Bash but need to source .zshrc
+    if [[ "$config_file" == *".zshrc"* ]] && [[ "$ACTUAL_SHELL" == "bash" ]]; then
+        if [[ "$HAS_OH_MY_ZSH" == "true" ]]; then
+            # Oh My Zsh detected - create a safe source method
+            print_info "Detected Oh My Zsh - using safe config sourcing..."
+            # Extract only ASDF and certificate configs, skip Oh My Zsh
+            {
+                echo "# Temporary safe config sourcing"
+                grep -E "^export (ASDF_|SSL_|REQUESTS_|CURL_|BUN_|DENO_)" "$config_file" 2>/dev/null || true
+                grep -A5 -B5 "ASDF Configuration" "$config_file" 2>/dev/null || true
+            } | bash 2>/dev/null || true
+        else
+            # No Oh My Zsh - safe to source directly
+            source "$config_file" 2>/dev/null || true
+        fi
+        return 0
+    fi
+    
+    # Case 3: Standard case - source normally
+    source "$config_file" 2>/dev/null || true
 }
 
 # Cài đặt các gói cần thiết
@@ -709,6 +763,12 @@ EOF
 
 # Main script
 main() {
+    print_info "=== ASDF Auto Install Script - Universal Compatibility ==="
+    print_info "Shell Environment: $ACTUAL_SHELL"
+    print_info "Oh My Zsh: $HAS_OH_MY_ZSH"
+    print_info "Target Config: $(detect_shell_config)"
+    echo
+    
     print_info "Bắt đầu cài đặt các plugin asdf và ngôn ngữ lập trình..."
     echo
     
@@ -785,9 +845,37 @@ main() {
     echo
     print_info "Chạy 'asdf list' để xem các phiên bản đã cài đặt"
     print_info "Chạy 'asdf current' để xem các phiên bản hiện tại"
-    print_info "Khởi động lại terminal hoặc chạy 'source $(detect_shell_config)' để áp dụng cấu hình chứng chỉ"
-    source $(detect_shell_config)
-    exec $SHELL
+    
+    # Smart final configuration based on shell environment
+    local config_file=$(detect_shell_config)
+    print_info "Configuration written to: $config_file"
+    
+    case "$ACTUAL_SHELL" in
+        "zsh")
+            print_success "Zsh detected - applying configuration..."
+            source_shell_config
+            if [[ "$HAS_OH_MY_ZSH" == "true" ]]; then
+                print_info "Oh My Zsh environment - restart terminal or run: exec zsh"
+            else
+                exec zsh
+            fi
+            ;;
+        "bash")
+            if [[ "$HAS_OH_MY_ZSH" == "true" ]]; then
+                print_warning "Oh My Zsh detected but running in Bash"
+                print_info "For best experience, switch to Zsh: exec zsh"
+                print_info "Or restart terminal"
+            else
+                print_success "Bash environment - applying configuration..."
+                source_shell_config
+                exec bash
+            fi
+            ;;
+        *)
+            print_warning "Unknown shell environment"
+            print_info "Please restart terminal or source config manually: source $config_file"
+            ;;
+    esac
 }
 
 # Chạy script

@@ -331,7 +331,10 @@ export CURL_CA_BUNDLE=\"/etc/ssl/certs/ca-certificates.crt\"
 export BUN_CA_BUNDLE_PATH=\"/etc/ssl/certs/ca-certificates.crt\"
 
 # Deno certificate configuration
-export DENO_CERT=\"/etc/ssl/certs/ca-certificates.crt\""
+export DENO_CERT=\"/etc/ssl/certs/ca-certificates.crt\"
+
+export NODE_EXTRA_CA_CERTS="/etc/ssl/certs/ca-certificates.crt"
+export NODE_OPTIONS="--use-openssl-ca""
     
     local shell_config=$(detect_shell_config)
     
